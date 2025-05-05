@@ -4,10 +4,11 @@ import bcrypt from 'bcrypt';
 const saltRounds = 10; // Cost factor for bcrypt hashing
 
 class User {
-    constructor(id, email, password, createdAt, updatedAt) {
+    constructor(id, email, password, role, createdAt, updatedAt) {
         this.id = id;
         this.email = email;
         this.password = password; // Note: This will store the hashed password
+        this.role = role; // Store the role
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
     }
@@ -18,6 +19,7 @@ class User {
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 email VARCHAR(255) NOT NULL UNIQUE,
                 password VARCHAR(255) NOT NULL,
+                role VARCHAR(50) NOT NULL DEFAULT 'user',
                 createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             )
@@ -28,9 +30,11 @@ class User {
     static async create(email, plainPassword) {
         try {
             const hashedPassword = await bcrypt.hash(plainPassword, saltRounds);
+            const defaultRole = 'user'; // Definir el rol por defecto
             const [result] = await pool.execute(
-                'INSERT INTO users (email, password) VALUES (?, ?)',
-                [email, hashedPassword]
+                // Añadir 'role' a la consulta y a los parámetros
+                'INSERT INTO users (email, password, role) VALUES (?, ?, ?)',
+                [email, hashedPassword, defaultRole] // Pasar el rol
             );
             return result.insertId; // Devuelve el ID del usuario creado
         } catch (error) {
@@ -42,25 +46,38 @@ class User {
 
     // Método para encontrar un usuario por su email
     static async findByEmail(email) {
-        const [rows] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
-        if (rows.length === 0) {
-            return null; // No se encontró el usuario
+        const sql = 'SELECT id, email, password, role, createdAt, updatedAt FROM users WHERE email = ?';
+        const params = [email];
+        try {
+            const [rows] = await pool.execute(sql, params);
+            if (rows.length === 0) {
+                return null; // No se encontró el usuario
+            }
+            const row = rows[0];
+            // Devolvemos una instancia de User con los datos, incluyendo el hash de la contraseña y el rol
+            return new User(row.id, row.email, row.password, row.role, row.createdAt, row.updatedAt);
+        } catch (error) {
+            console.error("Error en User.findByEmail:", error);
+            throw error;
         }
-        const row = rows[0];
-        // Devolvemos una instancia de User con los datos, incluyendo el hash de la contraseña
-        return new User(row.id, row.email, row.password, row.createdAt, row.updatedAt);
     }
 
     // Método para encontrar un usuario por su ID
     static async findById(id) {
-        const [rows] = await pool.execute('SELECT * FROM users WHERE id = ?', [id]);
-        if (rows.length === 0) {
-            return null; // No se encontró el usuario
+        const sql = 'SELECT id, email, role, createdAt, updatedAt FROM users WHERE id = ?';
+        const params = [id];
+        try {
+            const [rows] = await pool.execute(sql, params);
+            if (rows.length === 0) {
+                return null; // No se encontró el usuario
+            }
+            const row = rows[0];
+            // Devolvemos una instancia de User, usualmente no necesitamos la contraseña aquí
+            return new User(row.id, row.email, null, row.role, row.createdAt, row.updatedAt); // Omitiendo password hash
+        } catch (error) {
+            console.error("Error en User.findById:", error);
+            throw error;
         }
-        const row = rows[0];
-        // Devolvemos una instancia de User, usualmente no necesitamos la contraseña aquí
-        // Podríamos omitirla o devolver un objeto plano si es necesario
-        return new User(row.id, row.email, null, row.createdAt, row.updatedAt); // Omitiendo password hash
     }
 
     // Método de instancia para comparar contraseñas

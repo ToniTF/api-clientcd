@@ -41,33 +41,33 @@ export const login = async (req, res) => {
     }
 
     try {
-        // 1. Buscar al usuario por email
+        // 1. Buscar al usuario por email (asegúrate que findByEmail devuelva el rol)
         const user = await User.findByEmail(email);
         if (!user) {
-            return res.status(401).json({ message: 'Credenciales inválidas.' }); // Email no encontrado
+            return res.status(401).json({ message: 'Credenciales inválidas.' });
         }
 
-        // 2. Comparar la contraseña proporcionada con la hasheada en la BD
+        // 2. Comparar la contraseña
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
-            return res.status(401).json({ message: 'Credenciales inválidas.' }); // Contraseña incorrecta
+            return res.status(401).json({ message: 'Credenciales inválidas.' });
         }
 
-        // 3. Si las credenciales son correctas, generar el token JWT
-        const payload = { userId: user.id }; // Incluye el ID del usuario en el payload
+        // 3. Generar el token JWT
+        const payload = { userId: user.id, role: user.role }; // <-- Opcional: Añadir rol al payload del token
         const secret = process.env.JWT_SECRET;
-        const options = { expiresIn: '1h' }; // El token expira en 1 hora
+        const options = { expiresIn: '1h' };
 
         const token = jwt.sign(payload, secret, options);
 
-        // 4. Enviar la respuesta con el token Y los datos del usuario
+        // 4. Enviar la respuesta con token y datos del usuario (incluyendo el rol)
         res.status(200).json({
             message: 'Login exitoso.',
             token: token,
-            user: { // <-- Incluir objeto user
+            user: {
                 id: user.id,
-                email: user.email
-                // Puedes añadir otros campos seguros si los necesitas en el frontend
+                email: user.email,
+                role: user.role // <-- AÑADIR EL ROL AQUÍ
             }
         });
 
