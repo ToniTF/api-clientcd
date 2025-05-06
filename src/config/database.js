@@ -1,23 +1,27 @@
-import mysql from 'mysql2/promise'; // Usa mysql2/promise
-import 'dotenv/config'; // Carga variables de entorno
+import pg from 'pg';
+import 'dotenv/config';
 
-// Crea un pool de conexiones en lugar de una única conexión
-const pool = mysql.createPool({
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER, // Asegúrate que DB_USER esté en .env
-    password: process.env.DB_PASSWORD, // Asegúrate que DB_PASSWORD esté en .env
-    database: process.env.DB_DATABASE, // Usa DB_DATABASE como en tu .env
-    port: process.env.DB_PORT || 3306,
-    waitForConnections: true, // Espera si todas las conexiones están en uso
-    connectionLimit: 10,      // Número máximo de conexiones en el pool
-    queueLimit: 0             // Sin límite en la cola de espera
+const { Pool } = pg;
+
+const pool = new Pool({
+    user: process.env.DB_USER,
+    host: process.env.DB_HOST,
+    database: process.env.DB_DATABASE,
+    password: process.env.DB_PASSWORD,
+    port: parseInt(process.env.DB_PORT || '5432', 10),
+    // Para Render, si te conectas desde un servicio de Render a una DB de Render,
+    // SSL puede no ser necesario en el cliente. Si usas la DATABASE_URL de Render,
+    // a menudo ya incluye los parámetros SSL.
+    // ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 });
 
-// No necesitas pool.connect(), el pool maneja las conexiones automáticamente.
-// Puedes añadir un listener para errores del pool si quieres.
+pool.on('connect', () => {
+    console.log('Conectado exitosamente a la base de datos PostgreSQL!');
+});
+
 pool.on('error', (err) => {
-    console.error('Error en el pool de conexiones MySQL:', err);
+    console.error('Error inesperado en el cliente de la base de datos PostgreSQL', err);
+    process.exit(-1); // Salir si hay un error crítico con la DB
 });
 
-// Exporta el pool para que los modelos puedan usarlo
 export default pool;

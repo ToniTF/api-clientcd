@@ -1,150 +1,137 @@
-import pool from '../config/database.js'; // Asegúrate de que la ruta sea correcta
+import pool from '../config/database.js'; // Asegúrate que database.js esté configurado para pg
 
 class Post {
-    constructor(id, title, content, authorId, createdAt, updatedAt) {
+    constructor(id, title, content, authorId, createdAt, updatedAt, authorEmail = null) { // authorEmail es opcional
         this.id = id;
         this.title = title;
         this.content = content;
-        this.authorId = authorId;
-        this.createdAt = createdAt;
-        this.updatedAt = updatedAt;
+        this.authorId = authorId; // En PostgreSQL, el nombre de columna es "authorId"
+        this.createdAt = createdAt; // En PostgreSQL, el nombre de columna es "createdAt"
+        this.updatedAt = updatedAt; // En PostgreSQL, el nombre de columna es "updatedAt"
+        if (authorEmail) {
+            this.authorEmail = authorEmail; // Para cuando hacemos JOIN en findById
+        }
     }
 
-    static createTableQuery() {
-        return `
-            CREATE TABLE IF NOT EXISTS posts (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                title VARCHAR(255) NOT NULL,
-                content TEXT NOT NULL,
-                authorId INT NOT NULL,
-                createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                FOREIGN KEY (authorId) REFERENCES users(id) ON DELETE CASCADE
-            )
-        `;
+    static async create({ title, content, authorId }) {
+        // Usar comillas dobles para "authorId" si así se definió en la tabla de PostgreSQL
+        const sql = 'INSERT INTO posts (title, content, "authorId") VALUES ($1, $2, $3) RETURNING id, title, content, "authorId", "createdAt", "updatedAt"';
+        const params = [title, content, authorId];
+        try {
+            const result = await pool.query(sql, params);
+            if (result.rows.length > 0) {
+                const row = result.rows[0];
+                return new Post(row.id, row.title, row.content, row["authorId"], row["createdAt"], row["updatedAt"]);
+            }
+            throw new Error("No se pudo crear el post.");
+        } catch (error) {
+            console.error("Error creating post:", error);
+            throw error;
+        }
     }
 
-    // Método para crear un nuevo post
-    static async create(title, content, authorId) {
-        const [result] = await pool.execute(
-            'INSERT INTO posts (title, content, authorId) VALUES (?, ?, ?)',
-            [title, content, authorId]
-        );
-        return result.insertId; // Devuelve el ID del post creado
-    }
-
-    // Método para obtener todos los posts
     static async findAll() {
-        const [rows] = await pool.query('SELECT * FROM posts ORDER BY createdAt DESC');
-        return rows.map(row => new Post(row.id, row.title, row.content, row.authorId, row.createdAt, row.updatedAt));
+        // Usar comillas dobles para los nombres de columna si se definieron así en la tabla
+        const sql = 'SELECT id, title, content, "authorId", "createdAt", "updatedAt" FROM posts ORDER BY "createdAt" DESC';
+        try {
+            const result = await pool.query(sql);
+            return result.rows.map(row => new Post(row.id, row.title, row.content, row["authorId"], row["createdAt"], row["updatedAt"]));
+        } catch (error) {
+            console.error("Error finding all posts:", error);
+            throw error;
+        }
     }
 
-    // Método para encontrar un post por su ID, INCLUYENDO información del autor
     static async findById(id) {
-        // Modificamos la consulta SQL para unir 'posts' con 'users'
         const sql = `
             SELECT
                 p.id,
                 p.title,
                 p.content,
-                p.authorId,
-                p.createdAt,
-                p.updatedAt,
-                u.id AS authorUserId,  -- Renombramos users.id para claridad
-                u.email AS authorEmail -- Seleccionamos el email del autor
-                -- Puedes añadir u.username AS authorUsername si tienes esa columna
+                p."authorId",
+                p."createdAt",
+                p."updatedAt",
+                u.email AS "authorEmail"
             FROM
                 posts p
             LEFT JOIN
-                users u ON p.authorId = u.id -- Unimos por el ID del autor
+                users u ON p."authorId" = u.id
             WHERE
-                p.id = ?
+                p.id = $1
         `;
         const params = [id];
-
         try {
-            const [rows] = await pool.execute(sql, params);
-
-            if (rows.length === 0) {
-                return null; // No se encontró el post
+            const result = await pool.query(sql, params);
+            if (result.rows.length === 0) {
+                return null;
             }
-
-            // Devolvemos directamente el objeto de la fila, que ahora contiene
-            // tanto los datos del post como los del autor.
-            // Ya no creamos una instancia de 'new Post()' aquí para mantenerlo simple.
-            const postData = rows[0];
-            return postData;
-
+            const row = result.rows[0];
+            // Creamos una instancia de Post, pasando el email del autor
+            return new Post(row.id, row.title, row.content, row["authorId"], row["createdAt"], row["updatedAt"], row["authorEmail"]);
         } catch (error) {
             console.error("Error en Post.findById con JOIN:", error);
-            throw error; // Relanza para que el controlador lo maneje
+            throw error;
         }
     }
 
-    /**
-     * Actualiza un post en la base de datos.
-     * Solo permite la actualización si el ID del post y el ID del autor coinciden.
-     * @param {number|string} id - El ID del post a actualizar.
-     * @param {string} title - El nuevo título del post.
-     * @param {string} content - El nuevo contenido del post.
-     * @param {number|string} userId - El ID del usuario que intenta actualizar (debe ser el autor).
-     * @returns {Promise<number>} - Promesa que resuelve con el número de filas afectadas.
-     */
-    static async updateById(id, title, content, userId) {
-        const sql = `
-            UPDATE posts
-            SET title = ?, content = ?
-            WHERE id = ? AND authorId = ?
-        `;
-        // Los parámetros deben estar en el orden correcto: title, content, id, userId
+    static async updateById(id, { title, content, userId }) { // userId para verificar autorización
+        // "updatedAt" se actualizará automáticamente por el trigger en PostgreSQL
+        // Asegurarse que el userId coincida con el authorId del post
+        const sql = 'UPDATE posts SET title = $1, content = $2 WHERE id = $3 AND "authorId" = $4 RETURNING id, title, content, "authorId", "createdAt", "updatedAt"';
         const params = [title, content, id, userId];
-
         try {
-            const [result] = await pool.query(sql, params);
-            // result.affectedRows contendrá 0 si no se encontró el post con ese ID Y ese authorId,
-            // o 1 si la actualización fue exitosa.
-            return result.affectedRows;
+            const result = await pool.query(sql, params);
+            if (result.rows.length > 0) {
+                const row = result.rows[0];
+                return new Post(row.id, row.title, row.content, row["authorId"], row["createdAt"], row["updatedAt"]);
+            }
+            // Si no se devuelve ninguna fila, significa que el post no existía o el usuario no era el autor
+            return null;
         } catch (error) {
-            console.error("Error en Post.updateById:", error);
-            // Relanza el error para que el controlador lo maneje
+            console.error("Error updating post by ID:", error);
             throw error;
         }
     }
 
-    /**
-     * Elimina un post en la base de datos.
-     * Solo permite la eliminación si el ID del post y el ID del autor coinciden.
-     * @param {number|string} id - El ID del post a eliminar.
-     * @param {number|string} userId - El ID del usuario que intenta eliminar (debe ser el autor).
-     * @returns {Promise<number>} - Promesa que resuelve con el número de filas afectadas.
-     */
-    static async deleteById(id, userId) {
-        const sql = `
-            DELETE FROM posts
-            WHERE id = ? AND authorId = ?
-        `;
+    static async deleteById(id, userId) { // userId para verificar autorización
+        // Asegurarse que el userId coincida con el authorId del post
+        const sql = 'DELETE FROM posts WHERE id = $1 AND "authorId" = $2 RETURNING id';
         const params = [id, userId];
-
         try {
-            const [result] = await pool.query(sql, params);
-            return result.affectedRows; // 0 si no se encontró/autorizó, 1 si se borró
+            const result = await pool.query(sql, params);
+            return result.rowCount > 0; // Devuelve true si se eliminó una fila (rowCount > 0)
         } catch (error) {
-            console.error("Error en Post.deleteById:", error);
+            console.error("Error deleting post by ID:", error);
             throw error;
         }
     }
 
-    // Puedes añadir más métodos aquí (update, delete, findByAuthor, etc.)
+    // Si tienes métodos para buscar posts por autorId
+    static async findByAuthorId(authorId) {
+        const sql = 'SELECT id, title, content, "authorId", "createdAt", "updatedAt" FROM posts WHERE "authorId" = $1 ORDER BY "createdAt" DESC';
+        const params = [authorId];
+        try {
+            const result = await pool.query(sql, params);
+            return result.rows.map(row => new Post(row.id, row.title, row.content, row["authorId"], row["createdAt"], row["updatedAt"]));
+        } catch (error) {
+            console.error("Error finding posts by author ID:", error);
+            throw error;
+        }
+    }
 }
 
 export default Post;
 
-// Inicializar la tabla si no existe (opcional, puede hacerse en otro lugar)
+// --- ¡¡¡IMPORTANTE!!! ---
+// EL SIGUIENTE BLOQUE DE INICIALIZACIÓN DE TABLA HA SIDO ELIMINADO.
+// Las tablas deben crearse manualmente con el script SQL de PostgreSQL que ejecutaste en pgAdmin.
+/*
 (async () => {
     try {
-        await pool.query(Post.createTableQuery());
-        console.log("Tabla 'posts' verificada/creada exitosamente.");
+        // await pool.query(Post.createTableQuery()); // ESTO USABA SINTAXIS MYSQL
+        // console.log("Tabla 'posts' verificada/creada exitosamente.");
     } catch (error) {
-        console.error("Error al crear/verificar la tabla 'posts':", error);
+        // console.error("Error al crear/verificar la tabla 'posts':", error);
     }
 })();
+*/
