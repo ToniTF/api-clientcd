@@ -18,8 +18,9 @@ export const createPost = async (req, res) => {
     }
 
     try {
-        const postId = await Post.create(title, content, authorId);
-        res.status(201).json({ message: 'Post creado exitosamente.', postId });
+        // Modificar la llamada para pasar un objeto
+        const newPost = await Post.create({ title, content, authorId });
+        res.status(201).json({ message: 'Post creado exitosamente.', postId: newPost.id });
     } catch (error) {
         console.error("Error al crear el post:", error);
         // Podrías verificar errores específicos, como una clave foránea inválida si el authorId no existe en users
