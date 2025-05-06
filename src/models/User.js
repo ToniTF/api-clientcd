@@ -1,5 +1,5 @@
 import pool from '../config/database.js'; // Asegúrate que database.js esté configurado para pg
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 
 const saltRounds = 10;
 
