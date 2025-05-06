@@ -1,0 +1,4 @@
+# .gitignore
+node_modules/
+.env
+# ... otros archivos y carpetas a ignorar
