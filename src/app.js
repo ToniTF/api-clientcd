@@ -15,7 +15,8 @@ const app = express();
 // Lista de orígenes permitidos
 const allowedOrigins = [
     'http://localhost:3000',       // Para desarrollo local directo
-    'http://192.168.56.1:3000'     // Para acceso desde la IP específica
+    'http://192.168.56.1:3000',     // Para acceso desde la IP específica
+    'https://tonitf.github.io'       // Añadido para permitir GitHub Pages
 ];
 
 app.use(cors({
